@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Coordina Rescate — La Guaira</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c232c; --line:#2a323d;
+    --ink:#e6edf3; --muted:#8b949e; --muted-2:#6b7480;
+    --accent:#2dd4bf;            /* chrome interactivo */
+    --crit:#ef4444; --alta:#f97316; --media:#facc15; --baja:#3b82f6;
+    --ok:#22c55e; --gris:#5b6573;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    font-size:14px; line-height:1.4; -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  button{font-family:inherit; cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* ===== Layout ===== */
+  .app{display:flex; flex-direction:column; height:100%}
+  header.top{
+    display:flex; align-items:center; gap:14px; padding:8px 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap;
+  }
+  .brand{display:flex; flex-direction:column; line-height:1.05; margin-right:4px}
+  .brand b{font-size:15px; letter-spacing:.3px}
+  .brand span{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:1.2px}
+
+  .stats{display:flex; gap:8px; flex:1; flex-wrap:wrap}
+  .stat{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    padding:5px 11px; min-width:84px;
+  }
+  .stat .n{font-family:var(--mono); font-size:19px; font-weight:600; line-height:1}
+  .stat .l{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-top:3px}
+  .stat.crit .n{color:var(--crit)} .stat.ok .n{color:var(--ok)} .stat.warn .n{color:var(--alta)}
+
+  .sync{display:flex; align-items:center; gap:7px; font-size:11px; color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .dot.local{background:var(--alta)}
+  .btn{
+    background:var(--panel-2); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:7px 11px; font-size:12.5px; font-weight:500;
+  }
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent); color:#04201c; border-color:transparent; font-weight:600}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:4px 8px; font-size:11.5px}
+
+  .body{display:flex; flex:1; min-height:0}
+  #map{flex:1; min-width:0; background:#0a0e13; z-index:0}
+  aside{
+    width:380px; max-width:46vw; background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  .tabs{display:flex; border-bottom:1px solid var(--line)}
+  .tab{
+    flex:1; background:transparent; border:0; color:var(--muted); padding:11px 6px;
+    font-size:12.5px; font-weight:600; border-bottom:2px solid transparent;
+  }
+  .tab.active{color:var(--ink); border-bottom-color:var(--accent)}
+  .pane{flex:1; overflow-y:auto; padding:12px}
+  .pane::-webkit-scrollbar{width:9px} .pane::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px}
+
+  /* ===== Filtros ===== */
+  .filters{display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap}
+  .chip{
+    background:var(--panel-2); border:1px solid var(--line); color:var(--muted);
+    border-radius:999px; padding:4px 10px; font-size:11.5px;
+  }
+  .chip.on{color:var(--ink); border-color:var(--accent)}
+
+  /* ===== Tarjeta de reporte ===== */
+  .card{
+    background:var(--panel-2); border:1px solid var(--line); border-left-width:4px;
+    border-radius:9px; padding:10px 11px; margin-bottom:9px; cursor:pointer;
+  }
+  .card:hover{border-color:var(--accent)}
+  .card.u-critica{border-left-color:var(--crit)} .card.u-alta{border-left-color:var(--alta)}
+  .card.u-media{border-left-color:var(--media)} .card.u-baja{border-left-color:var(--baja)}
+  .card.done{opacity:.62; border-left-color:var(--ok)}
+  .card .row1{display:flex; align-items:baseline; gap:8px; justify-content:space-between}
+  .card .lugar{font-weight:600; font-size:13.5px}
+  .card .meta{display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap; font-size:11.5px; color:var(--muted)}
+  .pill{font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:6px; background:#0d1117; border:1px solid var(--line)}
+  .pill.ppl{color:var(--accent)} .pill.resc{color:var(--ok)}
+  .badge{font-size:10px; text-transform:uppercase; letter-spacing:.5px; padding:2px 7px; border-radius:5px; font-weight:700}
+  .b-critica{background:rgba(239,68,68,.15);color:#fca5a5} .b-alta{background:rgba(245,158,11,.15);color:#fcd34d}
+  .b-media{background:rgba(234,179,8,.13);color:#fde68a} .b-baja{background:rgba(59,130,246,.15);color:#93c5fd}
+  .estado{font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted-2)}
+  .dist{font-family:var(--mono); color:var(--accent); font-size:11px}
+
+  /* ===== Formularios ===== */
+  label{display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin:11px 0 4px}
+  input,select,textarea{
+    width:100%; background:#0d1117; border:1px solid var(--line); color:var(--ink);
+    border-radius:8px; padding:9px 10px; font-size:13.5px; font-family:inherit;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--accent); outline:none}
+  textarea{resize:vertical; min-height:54px}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .seg{display:flex; gap:6px}
+  .seg button{flex:1; padding:8px 4px; font-size:11.5px; font-weight:600; border-radius:7px;
+    background:#0d1117; border:1px solid var(--line); color:var(--muted)}
+  .seg button.on{color:#04201c}
+  .seg button.on.s-critica{background:var(--crit); border-color:transparent; color:#fff}
+  .seg button.on.s-alta{background:var(--alta); border-color:transparent}
+  .seg button.on.s-media{background:var(--media); border-color:transparent}
+  .seg button.on.s-baja{background:var(--baja); border-color:transparent; color:#fff}
+  .hint{font-size:11px; color:var(--muted-2); margin-top:6px}
+  .zones{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px}
+
+  .empty{color:var(--muted); text-align:center; padding:36px 16px; font-size:13px}
+  .empty b{color:var(--ink); display:block; margin-bottom:6px}
+
+  .reco{
+    background:linear-gradient(180deg,rgba(45,212,191,.10),transparent);
+    border:1px solid var(--accent); border-radius:10px; padding:11px; margin-bottom:12px;
+  }
+  .reco h4{margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.7px; color:var(--accent)}
+  .reco .tg{font-weight:700; font-size:15px}
+
+  /* ===== Markers ===== */
+  .leaflet-div-icon{background:transparent;border:0}
+  .mk{width:20px;height:20px;border-radius:50%;border:2.5px solid #0d1117;box-shadow:0 1px 4px rgba(0,0,0,.7)}
+  .mk.u-critica{background:var(--crit)} .mk.u-alta{background:var(--alta)}
+  .mk.u-media{background:var(--media)} .mk.u-baja{background:var(--baja)} .mk.done{background:var(--ok)}
+  .mk.pulse{animation:pulse 1.5s ease-out infinite}
+  .mk-team{width:26px;height:26px;border-radius:7px;border:2.5px solid #0d1117;
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:11px;
+    letter-spacing:.3px;text-shadow:0 1px 2px rgba(0,0,0,.55);box-shadow:0 1px 6px rgba(0,0,0,.7)}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.55)}100%{box-shadow:0 0 0 14px rgba(239,68,68,0)}}
+  @media (prefers-reduced-motion: reduce){.mk.pulse{animation:none}}
+
+  .notice{font-size:11px;color:var(--muted-2);background:var(--panel-2);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;margin-bottom:10px}
+  .notice b{color:var(--alta)}
+  .leaflet-popup-content-wrapper{background:var(--panel-2);color:var(--ink);border:1px solid var(--line)}
+  .leaflet-popup-tip{background:var(--panel-2)}
+  .leaflet-container{font-family:var(--sans)}
+
+  @media (max-width: 820px){
+    body{overflow:auto}
+    .app{height:auto; min-height:100%}
+    .body{flex-direction:column}
+    #map{height:46vh; min-height:300px}
+    aside{width:100%; max-width:100%; border-left:0; border-top:1px solid var(--line)}
+    .stat{min-width:72px; padding:4px 9px}
+    .stat .n{font-size:17px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><b>Coordina Rescate</b><span>La Guaira · USAR</span></div>
+    <div class="stats" id="stats"></div>
+    <div class="sync"><span class="dot" id="syncDot"></span><span id="syncTxt">Sincronizado</span></div>
+    <button class="btn ghost sm" id="btnExport">Exportar CSV</button>
+  </header>
+
+  <div class="body">
+    <div id="map"></div>
+    <aside>
+      <div class="tabs">
+        <button class="tab active" data-tab="cola">Prioridades</button>
+        <button class="tab" data-tab="agregar">Agregar</button>
+        <button class="tab" data-tab="equipos">Equipos</button>
+      </div>
+
+      <!-- COLA -->
+      <div class="pane" id="pane-cola">
+        <div id="recoBox"></div>
+        <div class="filters" id="filtros"></div>
+        <div id="lista"></div>
+      </div>
+
+      <!-- AGREGAR -->
+      <div class="pane" id="pane-agregar" style="display:none">
+        <div class="notice"><b>Ingreso manual.</b> Registra aquí lo que reporten redes sociales, llamadas o el campo. Verifica cada ubicación antes de despachar.</div>
+        <label>Lugar, dirección o enlace de Google Maps</label>
+        <input id="f_lugar" placeholder="Ej: Edif. Bahía Mar, Urb. Caribe — o pega un enlace de Google Maps" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn primary" id="btnUbicar" style="flex:1">Ubicar en el mapa</button>
+          <button class="btn" id="btnGMaps">Buscar en Google Maps ↗</button>
+        </div>
+        <div id="geoStatus" class="hint">Escribe el nombre y toca «Ubicar». También puedes tocar el mapa o pegar un enlace de Google Maps.</div>
+        <div id="geoResults"></div>
+        <div class="zones" id="zones"></div>
+        <label>Urgencia</label>
+        <div class="seg" id="f_urg">
+          <button data-u="critica" class="s-critica">Crítica</button>
+          <button data-u="alta" class="s-alta">Alta</button>
+          <button data-u="media" class="s-media">Media</button>
+          <button data-u="baja" class="s-baja">Baja</button>
+        </div>
+        <div class="grid2">
+          <div><label>Personas reportadas</label><input id="f_personas" type="number" min="0" value="1" /></div>
+          <div><label>Fuente</label>
+            <select id="f_fuente">
+              <option>Red social</option><option>Llamada</option><option>WhatsApp</option>
+              <option>En el campo</option><option>Autoridad</option>
+            </select>
+          </div>
+        </div>
+        <label>Notas</label>
+        <textarea id="f_notas" placeholder="Personas atrapadas, acceso, riesgos, señales de vida…"></textarea>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn primary" id="btnGuardar" style="flex:1">Guardar reporte</button>
+          <button class="btn ghost" id="btnLimpiar">Limpiar</button>
+        </div>
+      </div>
+
+      <!-- EQUIPOS -->
+      <div class="pane" id="pane-equipos" style="display:none">
+        <div class="notice">Marca la ubicación de cada brigada para que el asistente recomiende a dónde ir y arme el <b>plan de despacho</b> sin duplicar esfuerzos.</div>
+        <label>Nombre del equipo</label>
+        <input id="t_nombre" placeholder="Ej: USAR-1 / Binomio canino A" />
+        <div class="grid2" style="margin-top:8px">
+          <input id="t_lat" placeholder="Latitud" inputmode="decimal" />
+          <input id="t_lng" placeholder="Longitud" inputmode="decimal" />
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn" id="btnGPS" style="flex:1">Usar mi ubicación (GPS)</button>
+          <button class="btn primary" id="btnAddTeam">Agregar</button>
+        </div>
+        <div class="hint">Consejo: pon el equipo en el mapa tocándolo mientras esta pestaña está abierta.</div>
+        <div id="teamList" style="margin-top:14px"></div>
+        <button class="btn" id="btnPlan" style="width:100%;margin-top:8px">Generar plan de despacho</button>
+        <div id="planBox" style="margin-top:10px"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============ Almacenamiento — Apps Script como backend compartido ============ */
+// URL hardcodeada — no requiere configuración manual
+var scriptUrl = 'https://script.google.com/macros/s/AKfycbzw7TQDw0nl_rVzOQNjhh0Hb9EVdtTDu5s91oNliIDHiHxtLR49Zp8ufJIaypC8RC6fvQ/exec';
+
+// Cache local en memoria (fuente de verdad durante la sesión)
+var _cache = {};
+
+var Store = {
+  // Guarda en cache local + escribe al Sheet
+  async set(key, obj){
+    _cache[key] = obj;
+    try{ localStorage.setItem(key, JSON.stringify(obj)); }catch(e){}
+    _sheetSet(key, obj).catch(function(){});
+  },
+  // Borra del cache + elimina del Sheet
+  async del(key){
+    delete _cache[key];
+    try{ localStorage.removeItem(key); }catch(e){}
+    _sheetDel(key).catch(function(){});
+  },
+  // Lista claves por prefijo (desde cache en memoria)
+  async list(prefix){
+    return Object.keys(_cache).filter(function(k){ return k.indexOf(prefix)===0; });
+  },
+  // Obtiene valor desde cache
+  async get(key){
+    return _cache[key] != null ? _cache[key] : null;
+  }
+};
+
+// Construye URL GET
+function _sheetUrl(params){
+  var base = scriptUrl + (scriptUrl.indexOf('?')>=0 ? '&' : '?');
+  return base + Object.keys(params).map(function(k){
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&') + '&t=' + Date.now();
+}
+
+// ── ESCRITURA: no-cors (fire-and-forget) ──
+// Apps Script procesa la petición aunque el navegador no pueda leer la respuesta.
+// El redirect 302 a googleusercontent rompe CORS, pero con no-cors no nos importa
+// porque no leemos la respuesta — solo nos importa que el script ejecute la escritura.
+function _sheetSet(key, obj){
+  if(!scriptUrl) return Promise.resolve();
+  var copy = Object.assign({}, obj, {_key: key});
+  var encoded = btoa(unescape(encodeURIComponent(JSON.stringify(copy))));
+  var url = _sheetUrl({op:'set', b64: encoded});
+  return fetch(url, {mode:'no-cors'})
+    .then(function(){ console.log('✓ Sheet set enviado:', key); })
+    .catch(function(e){ console.warn('Sheet set error:', e); });
+}
+
+function _sheetDel(key){
+  if(!scriptUrl) return Promise.resolve();
+  var url = _sheetUrl({op:'del', key: key});
+  return fetch(url, {mode:'no-cors'})
+    .then(function(){ console.log('✓ Sheet del enviado:', key); })
+    .catch(function(e){ console.warn('Sheet del error:', e); });
+}
+
+// ── LECTURA: JSONP (un <script> tag no está sujeto a CORS) ──
+// El script devuelve  miCallback({...datos...})  y el navegador lo ejecuta.
+var _jsonpId = 0;
+function _sheetReadJSONP(){
+  return new Promise(function(resolve){
+    var cbName = '__sheetCB_' + (_jsonpId++) + '_' + Date.now();
+    var script = document.createElement('script');
+    var done = false;
+
+    window[cbName] = function(data){
+      done = true;
+      resolve(data);
+      cleanup();
+    };
+    function cleanup(){
+      try{ delete window[cbName]; }catch(e){ window[cbName]=undefined; }
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    script.onerror = function(){ if(!done){ resolve(null); cleanup(); } };
+    // timeout de seguridad
+    setTimeout(function(){ if(!done){ resolve(null); cleanup(); } }, 12000);
+
+    script.src = _sheetUrl({op:'read', callback: cbName});
+    document.head.appendChild(script);
+  });
+}
+
+// Carga todos los datos del Sheet vía JSONP
+async function _loadFromSheet(){
+  if(!scriptUrl) return false;
+  try{
+    var data = await _sheetReadJSONP();
+    if(!data || data.error){ console.warn('Sheet read error:', data && data.error); return false; }
+    var remoto = {};
+    (data.reportes||[]).forEach(function(r){ remoto['reporte:'+r.id]=r; });
+    (data.equipos||[]).forEach(function(t){ remoto['equipo:'+t.id]=t; });
+    Object.keys(remoto).forEach(function(k){
+      var r = remoto[k], local = _cache[k];
+      if(!local || (r.actualizado||r.creado||0) >= (local.actualizado||local.creado||0)){
+        _cache[k] = r;
+        try{ localStorage.setItem(k, JSON.stringify(r)); }catch(e){}
+      }
+    });
+    (data.eliminados||[]).forEach(function(k){
+      delete _cache[k];
+      try{ localStorage.removeItem(k); }catch(e){}
+    });
+    return true;
+  }catch(e){ console.warn('Sheet load error:', e); return false; }
+}
+
+// Recuperar cache desde localStorage al iniciar (fallback offline)
+(function restoreLocalCache(){
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k&&(k.indexOf('reporte:')===0||k.indexOf('equipo:')===0)){
+        try{ _cache[k]=JSON.parse(localStorage.getItem(k)); }catch(e){}
+      }
+    }
+  }catch(e){}
+})();
+
+
+/* ============ Estado ============ */
+var reportes={}, equipos={}, markers={}, teamMarkers={}, recoLine=null;
+var map, addUrg='critica', selectedTeamId=null, addTeamMode=false;
+var addLat=null, addLng=null, draftMarker=null;
+var filtro='activos';
+var URG_W={critica:4,alta:3,media:2,baja:1};
+var TEAM_COLORS=['#3b82f6','#8b5cf6','#06b6d4','#10b981','#ec4899','#6366f1','#0ea5e9','#a855f7','#14b8a6','#d946ef'];
+function abrev(nombre){
+  var n=(nombre||'').trim(); if(!n) return 'E';
+  var numMatch=n.match(/(\d+)/);
+  var letters=n.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ ]/g,'').trim().split(/\s+/).filter(Boolean);
+  if(numMatch){ var f=(letters[0]||n)[0]||'E'; return (f+numMatch[1]).toUpperCase().slice(0,3); }
+  if(letters.length>=2) return (letters[0][0]+letters[1][0]).toUpperCase();
+  return n.replace(/\s/g,'').slice(0,2).toUpperCase();
+}
+var ZONAS=[
+  {n:'Urb. Caribe / Bahía Mar', lat:10.6020, lng:-66.9180},
+  {n:'Caraballeda', lat:10.6125, lng:-66.8520},
+  {n:'Macuto', lat:10.6080, lng:-66.8920},
+  {n:'Maiquetía', lat:10.5980, lng:-66.9780},
+  {n:'Catia La Mar', lat:10.5980, lng:-67.0290},
+  {n:'La Guaira centro', lat:10.6017, lng:-66.9344}
+];
+
+/* ============ Utilidades ============ */
+function uid(p){ return p+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function num(v){ var n=parseFloat(v); return isNaN(n)?null:n; }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function activo(r){ return ['pendiente','en_camino','en_progreso'].indexOf(r.estado)>=0; }
+function hav(a,b,c,d){
+  var R=6371, t=Math.PI/180;
+  var dLat=(c-a)*t, dLng=(d-b)*t;
+  var x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a*t)*Math.cos(c*t)*Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+}
+function fmtDist(km){ return km<1?Math.round(km*1000)+' m':km.toFixed(km<10?1:0)+' km'; }
+var ESTADO_LBL={pendiente:'Pendiente',en_camino:'En camino',en_progreso:'En progreso',rescatado:'Rescatado',falsa_alarma:'Falsa alarma'};
+
+/* ============ Carga / sincronización ============ */
+async function loadAll(){
+  // Carga desde el Sheet (si hay URL) y rellena cache en memoria
+  var ok = await _loadFromSheet();
+  // En cualquier caso, reconstruir reportes/equipos desde cache
+  var rk = await Store.list('reporte:'); var nr={};
+  for(var i=0;i<rk.length;i++){ var o=await Store.get(rk[i]); if(o&&o.id) nr[o.id]=o; }
+  reportes=nr;
+  var tk = await Store.list('equipo:'); var ne={};
+  for(var j=0;j<tk.length;j++){ var t=await Store.get(tk[j]); if(t&&t.id) ne[t.id]=t; }
+  equipos=ne;
+  return ok;
+}
+async function sync(){
+  try{
+    var ok = await loadAll();
+    renderAll();
+    setSync(ok);
+  }catch(e){ setSync(false); }
+}
+function setSync(ok){
+  var d=document.getElementById('syncDot'), t=document.getElementById('syncTxt');
+  d.className='dot'+(ok?'':' local');
+  t.textContent= ok?'Sincronizado (Sheet)':'Sin conexión al Sheet';
+}
+
+/* ============ Mapa ============ */
+function initMap(){
+  map=L.map('map',{zoomControl:true}).setView([10.6017,-66.9344],13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  map.on('click',function(e){
+    if(addTeamMode){ document.getElementById('t_lat').value=e.latlng.lat.toFixed(5); document.getElementById('t_lng').value=e.latlng.lng.toFixed(5); return; }
+    setDraft(e.latlng.lat,e.latlng.lng,false);
+    showTab('agregar');
+  });
+}
+function reportIcon(r){
+  var cls='mk u-'+r.urgencia+(activo(r)?'':' done')+((r.urgencia==='critica'&&r.estado==='pendiente')?' pulse':'');
+  return L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[18,18],iconAnchor:[9,9]});
+}
+function renderMarkers(){
+  // reportes
+  var seen={};
+  Object.keys(reportes).forEach(function(id){
+    var r=reportes[id]; seen[id]=1;
+    if(r.lat==null||r.lng==null) return;
+    if(markers[id]){ markers[id].setLatLng([r.lat,r.lng]).setIcon(reportIcon(r)); }
+    else{
+      var m=L.marker([r.lat,r.lng],{icon:reportIcon(r)}).addTo(map);
+      m.on('click',function(){ openDetail(id); });
+      markers[id]=m;
+    }
+    markers[id].bindPopup(popupHTML(r));
+  });
+  Object.keys(markers).forEach(function(id){ if(!seen[id]){ map.removeLayer(markers[id]); delete markers[id]; } });
+  // equipos
+  var seenT={};
+  Object.keys(equipos).forEach(function(id){
+    var t=equipos[id]; seenT[id]=1; if(t.lat==null||t.lng==null) return;
+    var col=t.color||'#3b82f6';
+    var ic=L.divIcon({className:'',html:'<div class="mk-team" style="background:'+col+'">'+esc(abrev(t.nombre))+'</div>',iconSize:[26,26],iconAnchor:[13,13]});
+    if(teamMarkers[id]) teamMarkers[id].setLatLng([t.lat,t.lng]).setIcon(ic);
+    else teamMarkers[id]=L.marker([t.lat,t.lng],{icon:ic}).addTo(map).bindPopup('<b>'+esc(t.nombre)+'</b>');
+  });
+  Object.keys(teamMarkers).forEach(function(id){ if(!seenT[id]){ map.removeLayer(teamMarkers[id]); delete teamMarkers[id]; } });
+}
+function popupHTML(r){
+  return '<b>'+esc(r.lugar||'Sin nombre')+'</b><br>'+
+    '<span class="estado">'+esc(ESTADO_LBL[r.estado]||r.estado)+' · '+esc(r.urgencia)+'</span><br>'+
+    'Personas: '+(r.personas||0)+' · Rescatados: '+(r.rescatados||0);
+}
+
+/* ============ Render tarjetas / stats ============ */
+function listaOrdenada(){
+  var arr=Object.keys(reportes).map(function(k){return reportes[k];});
+  if(filtro==='activos') arr=arr.filter(activo);
+  else if(filtro==='critica') arr=arr.filter(function(r){return r.urgencia==='critica'&&activo(r);});
+  else if(filtro==='rescatado') arr=arr.filter(function(r){return r.estado==='rescatado';});
+  arr.sort(function(a,b){
+    var ad=activo(a)?0:1, bd=activo(b)?0:1; if(ad!==bd) return ad-bd;
+    var u=(URG_W[b.urgencia]||0)-(URG_W[a.urgencia]||0); if(u) return u;
+    return (b.creado||0)-(a.creado||0);
+  });
+  return arr;
+}
+function renderStats(){
+  var act=0,ppl=0,resc=0,critP=0;
+  Object.keys(reportes).forEach(function(k){var r=reportes[k];
+    if(activo(r)){act++; ppl+=(+r.personas||0)-(+r.rescatados||0);}
+    resc+=(+r.rescatados||0);
+    if(r.urgencia==='critica'&&r.estado==='pendiente') critP++;
+  });
+  document.getElementById('stats').innerHTML=
+    stat('crit',critP,'Críticos pend.')+stat('warn',act,'Reportes act.')+
+    stat('',Math.max(ppl,0),'Por atender')+stat('ok',resc,'Rescatados');
+}
+function stat(c,n,l){ return '<div class="stat '+c+'"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>'; }
+
+function renderLista(){
+  var cont=document.getElementById('lista'), arr=listaOrdenada();
+  if(!arr.length){ cont.innerHTML='<div class="empty"><b>Sin reportes todavía</b>Toca el mapa donde se necesita rescate, o usa la pestaña «Agregar».</div>'; return; }
+  cont.innerHTML=arr.map(cardHTML).join('');
+  Array.prototype.forEach.call(cont.querySelectorAll('.card'),function(el){
+    el.addEventListener('click',function(){ openDetail(el.getAttribute('data-id')); });
+  });
+}
+function cardHTML(r){
+  return '<div class="card u-'+r.urgencia+(activo(r)?'':' done')+'" data-id="'+r.id+'">'+
+    '<div class="row1"><div class="lugar">'+esc(r.lugar||'Sin nombre')+'</div>'+
+      '<span class="badge b-'+r.urgencia+'">'+r.urgencia+'</span></div>'+
+    '<div class="meta">'+
+      '<span class="pill ppl">'+(r.personas||0)+' pers.</span>'+
+      (r.rescatados?'<span class="pill resc">'+r.rescatados+' resc.</span>':'')+
+      '<span class="estado">'+esc(ESTADO_LBL[r.estado]||r.estado)+'</span>'+
+      '<span class="estado">· '+esc(r.fuente||'')+'</span>'+
+    '</div></div>';
+}
+
+/* ============ Detalle / acciones ============ */
+function openDetail(id){
+  var r=reportes[id]; if(!r) return;
+  if(markers[id]){ map.setView([r.lat,r.lng], Math.max(map.getZoom(),16)); markers[id].openPopup(); }
+  var estados=['pendiente','en_camino','en_progreso','rescatado','falsa_alarma'];
+  var opts=estados.map(function(e){return '<option value="'+e+'"'+(e===r.estado?' selected':'')+'>'+ESTADO_LBL[e]+'</option>';}).join('');
+  var teamOpts='<option value="">— sin asignar —</option>'+Object.keys(equipos).map(function(k){
+    return '<option value="'+k+'"'+(r.equipo===k?' selected':'')+'>'+esc(equipos[k].nombre)+'</option>';}).join('');
+  var html=
+    '<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px" id="ovl">'+
+    '<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:440px;width:100%;max-height:90vh;overflow:auto;padding:16px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:10px">'+
+        '<div><div style="font-weight:700;font-size:16px">'+esc(r.lugar||'Sin nombre')+'</div>'+
+        '<div class="estado" style="margin-top:3px">'+esc(r.fuente||'')+' · '+new Date(r.creado).toLocaleString('es')+'</div></div>'+
+        '<span class="badge b-'+r.urgencia+'">'+r.urgencia+'</span></div>'+
+      (r.notas?'<div style="margin-top:10px;font-size:13px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:9px">'+esc(r.notas)+'</div>':'')+
+      '<div class="grid2" style="margin-top:12px">'+
+        '<div><label>Estado</label><select id="d_estado">'+opts+'</select></div>'+
+        '<div><label>Equipo asignado</label><select id="d_team">'+teamOpts+'</select></div>'+
+      '</div>'+
+      '<div class="grid2">'+
+        '<div><label>Personas reportadas</label><input id="d_personas" type="number" min="0" value="'+(r.personas||0)+'"></div>'+
+        '<div><label>Rescatados con vida</label><input id="d_resc" type="number" min="0" value="'+(r.rescatados||0)+'"></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;margin-top:8px">'+
+        '<button class="btn sm" id="d_resc1">+1 rescatado</button>'+
+        '<button class="btn sm" id="d_camino">Marcar en camino</button>'+
+        '<button class="btn sm" id="d_listo">Marcar rescatado</button>'+
+      '</div>'+
+      '<a class="btn sm" href="https://www.google.com/maps/dir/?api=1&destination='+r.lat+','+r.lng+'" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;margin-top:8px">Cómo llegar (Google Maps) ↗</a>'+
+      '<div style="display:flex;gap:8px;margin-top:16px">'+
+        '<button class="btn primary" id="d_save" style="flex:1">Guardar cambios</button>'+
+        '<button class="btn" id="d_close">Cerrar</button>'+
+        '<button class="btn ghost" id="d_del" style="color:var(--crit)">Eliminar</button>'+
+      '</div>'+
+    '</div></div>';
+  var wrap=document.createElement('div'); wrap.innerHTML=html; document.body.appendChild(wrap.firstChild);
+  var ovl=document.getElementById('ovl');
+  function close(){ ovl.remove(); }
+  ovl.addEventListener('click',function(e){ if(e.target===ovl) close(); });
+  document.getElementById('d_close').onclick=close;
+  document.getElementById('d_resc1').onclick=function(){ var i=document.getElementById('d_resc'); i.value=(+i.value||0)+1; };
+  document.getElementById('d_camino').onclick=function(){ document.getElementById('d_estado').value='en_camino'; };
+  document.getElementById('d_listo').onclick=function(){ document.getElementById('d_estado').value='rescatado'; };
+  document.getElementById('d_save').onclick=async function(){
+    r.estado=document.getElementById('d_estado').value;
+    r.equipo=document.getElementById('d_team').value;
+    r.personas=+document.getElementById('d_personas').value||0;
+    r.rescatados=+document.getElementById('d_resc').value||0;
+    r.actualizado=Date.now();
+    reportes[r.id]=r; await Store.set('reporte:'+r.id,r); close(); renderAll();
+  };
+  document.getElementById('d_del').onclick=async function(){
+    if(!confirm('¿Eliminar este reporte? No se puede deshacer.')) return;
+    delete reportes[r.id]; await Store.del('reporte:'+r.id); close(); renderAll();
+  };
+}
+
+/* ============ Recomendador "¿A dónde ir?" + Plan ============ */
+function teamsConPos(){ return Object.keys(equipos).map(function(k){return equipos[k];}).filter(function(t){return t.lat!=null&&t.lng!=null;}); }
+function pendientes(){ return Object.keys(reportes).map(function(k){return reportes[k];}).filter(function(r){return (r.estado==='pendiente'||r.estado==='en_camino')&&r.lat!=null;}); }
+
+function renderReco(){
+  var box=document.getElementById('recoBox'); var ts=teamsConPos(); var ps=pendientes();
+  if(!ps.length){ box.innerHTML=''; if(recoLine){map.removeLayer(recoLine);recoLine=null;} return; }
+  var origin=null, originName='el mapa';
+  var sel=selectedTeamId&&equipos[selectedTeamId];
+  if(sel&&sel.lat!=null){ origin=sel; originName=sel.nombre; }
+  else if(ts.length){ origin=ts[0]; originName=ts[0].nombre; }
+  // ranking: urgencia, luego distancia (si hay origen)
+  var ranked=ps.map(function(r){
+    var d=origin?hav(origin.lat,origin.lng,r.lat,r.lng):null;
+    return {r:r,d:d};
+  }).sort(function(a,b){
+    var u=(URG_W[b.r.urgencia]||0)-(URG_W[a.r.urgencia]||0); if(u) return u;
+    if(a.d!=null&&b.d!=null) return a.d-b.d;
+    return (a.r.creado||0)-(b.r.creado||0);
+  });
+  var top=ranked[0];
+  box.innerHTML='<div class="reco"><h4>¿A dónde ir?</h4>'+
+    '<div class="tg">'+esc(top.r.lugar||'Sin nombre')+'</div>'+
+    '<div class="meta" style="margin-top:5px">'+
+      '<span class="badge b-'+top.r.urgencia+'">'+top.r.urgencia+'</span>'+
+      '<span class="pill ppl">'+(top.r.personas||0)+' pers.</span>'+
+      (top.d!=null?'<span class="dist">'+fmtDist(top.d)+' desde '+esc(originName)+'</span>':'<span class="estado">define la ubicación de un equipo para calcular distancia</span>')+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:9px">'+
+      '<button class="btn sm primary" id="reco_go">Ver en mapa</button>'+
+      (origin?'<button class="btn sm" id="reco_line">Trazar ruta</button>':'')+
+    '</div></div>';
+  document.getElementById('reco_go').onclick=function(){ openDetail(top.r.id); };
+  if(origin){ document.getElementById('reco_line').onclick=function(){
+    if(recoLine) map.removeLayer(recoLine);
+    recoLine=L.polyline([[origin.lat,origin.lng],[top.r.lat,top.r.lng]],{color:'#2dd4bf',weight:3,dashArray:'8 6'}).addTo(map);
+    map.fitBounds(recoLine.getBounds().pad(0.3));
+  };}
+}
+
+function renderTeams(){
+  var c=document.getElementById('teamList'); var ks=Object.keys(equipos);
+  if(!ks.length){ c.innerHTML='<div class="empty" style="padding:18px"><b>Sin equipos</b>Agrega tus brigadas para activar el plan de despacho.</div>'; return; }
+  c.innerHTML=ks.map(function(k){var t=equipos[k]; var col=t.color||'#3b82f6';
+    return '<div class="card" data-tid="'+k+'" style="border-left-color:'+col+'"'+(selectedTeamId===k?' data-sel="1"':'')+'>'+
+      '<div class="row1"><div class="lugar" style="display:flex;align-items:center;gap:8px">'+
+        '<span class="mk-team" style="position:static;width:24px;height:24px;background:'+col+';display:inline-flex">'+esc(abrev(t.nombre))+'</span>'+
+        esc(t.nombre)+'</div>'+
+      '<button class="btn sm ghost" data-del="'+k+'" style="color:var(--crit)">×</button></div>'+
+      '<div class="meta"><span class="estado">'+(t.lat!=null?t.lat.toFixed(4)+', '+t.lng.toFixed(4):'sin ubicación')+'</span>'+
+      (selectedTeamId===k?'<span class="dist">★ base del recomendador</span>':'<span class="estado">toca para usar como base</span>')+'</div></div>';
+  }).join('');
+  Array.prototype.forEach.call(c.querySelectorAll('.card'),function(el){
+    el.addEventListener('click',function(e){
+      if(e.target.hasAttribute('data-del')){ return; }
+      var k=el.getAttribute('data-tid'); selectedTeamId=(selectedTeamId===k?null:k); renderAll();
+      if(equipos[k]&&equipos[k].lat!=null) map.setView([equipos[k].lat,equipos[k].lng],15);
+    });
+  });
+  Array.prototype.forEach.call(c.querySelectorAll('[data-del]'),function(b){
+    b.addEventListener('click',async function(ev){ ev.stopPropagation();
+      var k=b.getAttribute('data-del'); if(!confirm('¿Eliminar equipo?')) return;
+      delete equipos[k]; if(selectedTeamId===k) selectedTeamId=null; await Store.del('equipo:'+k); renderAll();
+    });
+  });
+}
+
+function generarPlan(){
+  var box=document.getElementById('planBox');
+  var ts=teamsConPos().slice(); var ps=pendientes().slice();
+  if(!ts.length||!ps.length){ box.innerHTML='<div class="hint">Necesitas al menos un equipo con ubicación y un reporte pendiente.</div>'; return; }
+  ps.sort(function(a,b){ var u=(URG_W[b.urgencia]||0)-(URG_W[a.urgencia]||0); return u||(a.creado-b.creado); });
+  var libres=ts.map(function(t){return t;}); var asign=[];
+  ps.forEach(function(r){
+    if(!libres.length) return;
+    var best=-1,bd=Infinity;
+    for(var i=0;i<libres.length;i++){ var d=hav(libres[i].lat,libres[i].lng,r.lat,r.lng); if(d<bd){bd=d;best=i;} }
+    asign.push({t:libres[best],r:r,d:bd}); libres.splice(best,1);
+  });
+  box.innerHTML='<div class="reco"><h4>Plan de despacho sugerido</h4>'+
+    asign.map(function(a){
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--line)">'+
+        '<div><b>'+esc(a.t.nombre)+'</b><div class="estado">→ '+esc(a.r.lugar||'Sin nombre')+'</div></div>'+
+        '<div style="text-align:right"><span class="badge b-'+a.r.urgencia+'">'+a.r.urgencia+'</span><div class="dist">'+fmtDist(a.d)+'</div></div></div>';
+    }).join('')+
+    (libres.length?'<div class="hint">Equipos libres: '+libres.map(function(t){return esc(t.nombre);}).join(', ')+'</div>':'')+
+    '<div class="hint">Asignación por cercanía priorizando urgencia. Ajusta según riesgo estructural y recursos reales.</div></div>';
+}
+
+/* ============ Ubicación: nombre, enlace de Google Maps o toque en el mapa ============ */
+function parseLatLng(s){
+  if(!s) return null;
+  var d34=s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  var q=s.match(/[?&](?:q|query|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+  var at=s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  var bare=s.match(/^\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})\s*$/);
+  var p=d34||q||at||bare;
+  if(p){ var la=parseFloat(p[1]), ln=parseFloat(p[2]); if(!isNaN(la)&&!isNaN(ln)) return {lat:la,lng:ln}; }
+  return null;
+}
+function setDraft(lat,lng,recenter){
+  addLat=lat; addLng=lng;
+  if(draftMarker) draftMarker.setLatLng([lat,lng]);
+  else draftMarker=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div class="mk" style="background:var(--accent);width:20px;height:20px"></div>',iconSize:[20,20],iconAnchor:[10,10]}),zIndexOffset:1000}).addTo(map);
+  document.getElementById('geoStatus').innerHTML='<span style="color:var(--ok)">📍 Ubicado:</span> '+lat.toFixed(5)+', '+lng.toFixed(5)+' · <a href="'+gmapsUrl(lat,lng)+'" target="_blank" rel="noopener" style="color:var(--accent)">ver en Google Maps</a>';
+  if(recenter) map.setView([lat,lng],16);
+}
+function gmapsUrl(lat,lng){ return 'https://www.google.com/maps/search/?api=1&query='+lat+','+lng; }
+function abrirGMaps(){
+  var q=document.getElementById('f_lugar').value.trim();
+  var url= q? 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q+' La Guaira Venezuela')
+            : 'https://www.google.com/maps/@10.6017,-66.9344,13z';
+  window.open(url,'_blank','noopener');
+}
+async function ubicarLugar(){
+  var raw=document.getElementById('f_lugar').value.trim();
+  var st=document.getElementById('geoStatus'), res=document.getElementById('geoResults');
+  res.innerHTML='';
+  if(!raw){ st.textContent='Escribe un nombre de lugar o pega un enlace de Google Maps.'; return; }
+  // 1) ¿Trae coordenadas o enlace de Google Maps?
+  var pll=parseLatLng(raw);
+  if(pll){ setDraft(pll.lat,pll.lng,true); return; }
+  if(/maps\.app\.goo\.gl|goo\.gl\/maps/.test(raw)){
+    st.innerHTML='Ese es un enlace corto de Google Maps. Ábrelo, copia el enlace completo (el que tiene las coordenadas) y pégalo aquí — o toca el mapa.'; return;
+  }
+  // 2) Geocodificar por nombre (OpenStreetMap, sesgo a La Guaira/Venezuela)
+  st.textContent='Buscando «'+raw+'»…';
+  try{
+    var u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=ve&accept-language=es'+
+          '&viewbox=-67.25,10.70,-66.65,10.50&q='+encodeURIComponent(raw);
+    var r=await fetch(u,{headers:{'Accept':'application/json'}});
+    var j=await r.json();
+    if(!j||!j.length){ st.innerHTML='No se encontró «'+esc(raw)+'». Toca <b>Buscar en Google Maps</b>, ubica el punto, copia el enlace y pégalo aquí — o toca el mapa.'; return; }
+    st.textContent='Elige el resultado correcto:';
+    res.innerHTML=j.map(function(o,i){
+      return '<div class="card" data-gi="'+i+'" style="border-left-color:var(--accent)"><div class="lugar" style="font-size:12.5px">'+esc(o.display_name)+'</div></div>';
+    }).join('');
+    Array.prototype.forEach.call(res.querySelectorAll('[data-gi]'),function(el){
+      el.addEventListener('click',function(){
+        var o=j[+el.getAttribute('data-gi')];
+        setDraft(parseFloat(o.lat),parseFloat(o.lon),true);
+        res.innerHTML='';
+      });
+    });
+  }catch(e){
+    st.innerHTML='No se pudo buscar (sin conexión o bloqueado). Usa <b>Buscar en Google Maps</b> y pega el enlace, o toca el mapa.';
+  }
+}
+
+/* ============ Agregar reporte ============ */
+function renderZones(){
+  document.getElementById('zones').innerHTML=ZONAS.map(function(z,i){return '<button class="chip" data-z="'+i+'">'+esc(z.n)+'</button>';}).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#zones .chip'),function(b){
+    b.addEventListener('click',function(){ var z=ZONAS[+b.getAttribute('data-z')];
+      if(!document.getElementById('f_lugar').value) document.getElementById('f_lugar').value=z.n;
+      setDraft(z.lat,z.lng,true);
+    });
+  });
+}
+function bindUrg(){
+  Array.prototype.forEach.call(document.querySelectorAll('#f_urg button'),function(b){
+    b.addEventListener('click',function(){ addUrg=b.getAttribute('data-u');
+      Array.prototype.forEach.call(document.querySelectorAll('#f_urg button'),function(x){x.classList.remove('on');});
+      b.classList.add('on');
+    });
+  });
+  document.querySelector('#f_urg button[data-u="critica"]').classList.add('on');
+}
+async function guardar(){
+  var lugar=document.getElementById('f_lugar').value.trim();
+  if(!lugar){ alert('Escribe el nombre o dirección del lugar.'); return; }
+  if(addLat==null||addLng==null){
+    // intento resolver automáticamente antes de pedirlo
+    await ubicarLugar();
+    if(addLat==null||addLng==null){ alert('Falta ubicar el lugar. Toca «Ubicar en el mapa», elige un resultado, pega un enlace de Google Maps o toca el mapa.'); return; }
+  }
+  // si el campo trae un enlace de Google Maps, guarda un nombre limpio
+  var nombre=/https?:\/\//.test(lugar)?('Punto '+addLat.toFixed(4)+', '+addLng.toFixed(4)):lugar;
+  var r={ id:uid('r_'), lat:addLat, lng:addLng, lugar:nombre, urgencia:addUrg,
+    personas:+document.getElementById('f_personas').value||0, rescatados:0,
+    fuente:document.getElementById('f_fuente').value, estado:'pendiente',
+    equipo:'', notas:document.getElementById('f_notas').value.trim(),
+    creado:Date.now(), actualizado:Date.now() };
+  var la=addLat, ln=addLng;
+  reportes[r.id]=r; await Store.set('reporte:'+r.id,r);
+  limpiar(); showTab('cola'); renderAll();
+  map.setView([la,ln],16);
+}
+function limpiar(){
+  ['f_lugar','f_notas'].forEach(function(id){document.getElementById(id).value='';});
+  document.getElementById('f_personas').value='1';
+  addLat=null; addLng=null;
+  if(draftMarker){ map.removeLayer(draftMarker); draftMarker=null; }
+  document.getElementById('geoResults').innerHTML='';
+  document.getElementById('geoStatus').textContent='Escribe el nombre y toca «Ubicar». También puedes tocar el mapa o pegar un enlace de Google Maps.';
+}
+
+/* ============ Equipos UI ============ */
+async function addTeam(){
+  var n=document.getElementById('t_nombre').value.trim(); if(!n){ alert('Ponle nombre al equipo.'); return; }
+  var usados={}; Object.keys(equipos).forEach(function(k){ if(equipos[k].color) usados[equipos[k].color]=1; });
+  var color=TEAM_COLORS.filter(function(c){return !usados[c];})[0] || TEAM_COLORS[Object.keys(equipos).length % TEAM_COLORS.length];
+  var t={ id:uid('e_'), nombre:n, color:color, lat:num(document.getElementById('t_lat').value), lng:num(document.getElementById('t_lng').value), estado:'disponible', creado:Date.now() };
+  equipos[t.id]=t; await Store.set('equipo:'+t.id,t);
+  document.getElementById('t_nombre').value=''; document.getElementById('t_lat').value=''; document.getElementById('t_lng').value='';
+  renderAll();
+}
+function gps(){
+  if(!navigator.geolocation){ alert('Este dispositivo no tiene GPS disponible.'); return; }
+  navigator.geolocation.getCurrentPosition(function(p){
+    document.getElementById('t_lat').value=p.coords.latitude.toFixed(5);
+    document.getElementById('t_lng').value=p.coords.longitude.toFixed(5);
+  },function(){ alert('No se pudo obtener la ubicación. Revisa los permisos.'); },{enableHighAccuracy:true,timeout:8000});
+}
+
+/* ============ Tabs ============ */
+function showTab(name){
+  ['cola','agregar','equipos'].forEach(function(t){
+    document.getElementById('pane-'+t).style.display=(t===name?'':'none');
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(b){ b.classList.toggle('active',b.getAttribute('data-tab')===name); });
+  addTeamMode=(name==='equipos');
+}
+function renderFiltros(){
+  var opts=[['activos','Activos'],['critica','Críticos'],['rescatado','Rescatados'],['todos','Todos']];
+  document.getElementById('filtros').innerHTML=opts.map(function(o){return '<button class="chip'+(filtro===o[0]?' on':'')+'" data-f="'+o[0]+'">'+o[1]+'</button>';}).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#filtros .chip'),function(b){
+    b.addEventListener('click',function(){ filtro=b.getAttribute('data-f'); renderFiltros(); renderLista(); });
+  });
+}
+
+/* ============ Export ============ */
+function exportCSV(){
+  var rows=[['lugar','lat','lng','urgencia','estado','personas','rescatados','fuente','equipo','notas','creado']];
+  Object.keys(reportes).forEach(function(k){var r=reportes[k];
+    rows.push([r.lugar,r.lat,r.lng,r.urgencia,r.estado,r.personas,r.rescatados,r.fuente,(equipos[r.equipo]?equipos[r.equipo].nombre:''),r.notas,new Date(r.creado).toISOString()]);
+  });
+  var csv=rows.map(function(row){return row.map(function(c){return '"'+String(c==null?'':c).replace(/"/g,'""')+'"';}).join(',');}).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'}); var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='reportes_la_guaira_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+}
+
+/* ============ Render maestro ============ */
+function renderAll(){ renderStats(); renderMarkers(); renderFiltros(); renderLista(); renderReco(); renderTeams(); }
+
+/* ============ Init ============ */
+window.addEventListener('load',async function(){
+  initMap(); renderZones(); bindUrg();
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(b){ b.addEventListener('click',function(){showTab(b.getAttribute('data-tab'));}); });
+  document.getElementById('btnGuardar').onclick=guardar;
+  document.getElementById('btnLimpiar').onclick=limpiar;
+  document.getElementById('btnUbicar').onclick=ubicarLugar;
+  document.getElementById('btnGMaps').onclick=abrirGMaps;
+  document.getElementById('f_lugar').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); ubicarLugar(); } });
+  document.getElementById('btnAddTeam').onclick=addTeam;
+  document.getElementById('btnGPS').onclick=gps;
+  document.getElementById('btnPlan').onclick=generarPlan;
+  document.getElementById('btnExport').onclick=exportCSV;
+  setSync(true);
+  await sync();
+  setInterval(sync,6000); // refresco en vivo entre coordinadores
+});
+})();
+</script>
+</body>
+</html>
