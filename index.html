@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Triangulación de Rutas</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg:       #f7f8fa;
+    --surface:  #ffffff;
+    --border:   #e2e5ea;
+    --text:     #1a1d23;
+    --muted:    #6b7280;
+    --accent:   #2563eb;
+    --accent-h: #1d4ed8;
+    --danger:   #dc2626;
+    --green:    #16a34a;
+    --radius:   10px;
+    --shadow:   0 1px 4px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Header ── */
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 20px; height: 52px; display: flex; align-items: center; gap: 14px; }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; flex: 1; }
+  #statusDot { width: 8px; height: 8px; border-radius: 50%; background: #d1d5db; flex-shrink: 0; transition: background .3s; }
+  #statusDot.ok  { background: var(--green); }
+  #statusDot.err { background: var(--danger); }
+  #statusTxt { font-size: 12px; color: var(--muted); }
+
+  /* ── Layout ── */
+  main { display: grid; grid-template-columns: 1fr 320px; height: calc(100vh - 52px); }
+  @media(max-width:700px){ main { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; } }
+
+  /* ── Map ── */
+  #map { width: 100%; height: 100%; }
+
+  /* ── Sidebar ── */
+  aside { background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Config banner */
+  #configBanner { background: #fffbeb; border-bottom: 1px solid #fde68a; padding: 10px 14px; font-size: 12px; color: #92400e; display: none; }
+  #configBanner a { color: #b45309; font-weight: 600; text-decoration: underline; cursor: pointer; }
+
+  /* Script URL input */
+  #scriptPanel { padding: 14px; border-bottom: 1px solid var(--border); }
+  #scriptPanel label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom: 6px; }
+  #scriptPanel .inp-row { display: flex; gap: 6px; }
+  #scriptPanel input { flex: 1; font-size: 12px; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); min-width: 0; }
+  #scriptPanel input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #btnLoad { font-size: 12px; padding: 7px 12px; border-radius: 7px; border: none; background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; font-weight: 500; }
+  #btnLoad:hover { background: var(--accent-h); }
+  #btnLoad:disabled { opacity: .5; cursor: default; }
+
+  /* Stats row */
+  #statsRow { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .stat { flex: 1; padding: 12px 10px; text-align: center; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: none; }
+  .stat-val { font-size: 18px; font-weight: 600; color: var(--text); }
+  .stat-lbl { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .04em; }
+
+  /* Section labels */
+  .sec-hd { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 12px 14px 6px; }
+
+  /* Dest list */
+  #destList { flex: 1; overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .dest-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; transition: border-color .15s; }
+  .dest-row:hover { border-color: var(--accent); }
+  .dest-row.active { border-color: var(--accent); background: #eff6ff; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dest-name { flex: 1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dest-km { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  .dest-del { background: none; border: none; cursor: pointer; color: #d1d5db; font-size: 13px; padding: 0 2px; }
+  .dest-del:hover { color: var(--danger); }
+  .empty-hint { font-size: 12px; color: var(--muted); text-align: center; padding: 24px 10px; line-height: 1.6; }
+
+  /* Add form */
+  #addPanel { border-top: 1px solid var(--border); padding: 12px 14px; }
+  #addPanel .sec-hd { padding: 0 0 8px; }
+  #addPanel .fields { display: flex; flex-direction: column; gap: 6px; }
+  #addPanel input { width: 100%; font-size: 12px; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  #addPanel input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #addPanel .coord-row { display: flex; gap: 6px; }
+  #addPanel .coord-row input { flex: 1; }
+  #btnAdd { margin-top: 6px; width: 100%; font-size: 13px; padding: 8px; border-radius: 7px; border: none; background: var(--accent); color: #fff; cursor: pointer; font-weight: 500; }
+  #btnAdd:hover { background: var(--accent-h); }
+  #btnAdd:disabled { opacity: .5; cursor: default; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1a1d23; color: #fff; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: none; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🗺 Triangulación de Rutas</h1>
+  <div id="statusDot"></div>
+  <span id="statusTxt">Sin conectar</span>
+</header>
+
+<main>
+  <div id="map"></div>
+
+  <aside>
+    <div id="configBanner">
+      ⚠️ No hay URL del script guardada. <a onclick="focusScript()">Configura el Apps Script</a> para cargar datos.
+    </div>
+
+    <div id="scriptPanel">
+      <label>URL del Apps Script</label>
+      <div class="inp-row">
+        <input id="iScript" type="url" placeholder="https://script.google.com/macros/s/.../exec" />
+        <button id="btnLoad" onclick="loadFromScript()">Cargar</button>
+      </div>
+    </div>
+
+    <div id="statsRow">
+      <div class="stat"><div class="stat-val" id="sLineal">—</div><div class="stat-lbl">Lineal</div></div>
+      <div class="stat"><div class="stat-val" id="sVial">—</div><div class="stat-lbl">Vial ~</div></div>
+      <div class="stat"><div class="stat-val" id="sMin">—</div><div class="stat-lbl">Tiempo</div></div>
+    </div>
+
+    <div class="sec-hd">Destinos</div>
+    <div id="destList">
+      <div class="empty-hint">Conecta el Apps Script para<br>cargar destinos desde el Sheet.</div>
+    </div>
+
+    <div id="addPanel">
+      <div class="sec-hd">Agregar destino</div>
+      <div class="fields">
+        <input id="iName" placeholder="Nombre del destino" />
+        <input id="iGrupo" placeholder="Grupo / categoría (opcional)" />
+        <div class="coord-row">
+          <input id="iLat" placeholder="Latitud" type="number" step="any" />
+          <input id="iLon" placeholder="Longitud" type="number" step="any" />
+        </div>
+      </div>
+      <button id="btnAdd" onclick="addDest()">+ Agregar destino</button>
+    </div>
+  </aside>
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════════
+   CONFIG & STATE
+══════════════════════════════════════════ */
+const LS_KEY_URL  = 'triangulacion_script_url';
+const LS_KEY_DATA = 'triangulacion_cache';
+const COLORS = ['#2563eb','#16a34a','#d97706','#7c3aed','#dc2626','#0891b2','#db2777','#65a30d'];
+
+let ORIGIN = null;   // { lat, lng, name } — comes from Sheet
+let dests  = [];
+let activeIdx = 0;
+
+let map, originMarker, polylines = [], destMarkers = [];
+
+/* ══════════════════════════════════════════
+   MAP INIT
+══════════════════════════════════════════ */
+function initMap() {
+  map = L.map('map', { zoomControl: true, attributionControl: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  L.control.attribution({ prefix: '© <a href="https://openstreetmap.org">OpenStreetMap</a>' }).addTo(map);
+  map.setView([13.6929, -89.2182], 9); // El Salvador por defecto
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000, r = Math.PI / 180;
+  const p1 = lat1 * r, p2 = lat2 * r;
+  const dp = (lat2 - lat1) * r, dl = (lng2 - lng1) * r;
+  return 2 * R * Math.asin(Math.sqrt(Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2));
+}
+
+function originIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:16px;height:16px;background:#dc2626;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.35);"></div>`,
+    iconAnchor: [8, 8]
+  });
+}
+
+function destIcon(color, label, active) {
+  const border = active ? '3px solid #fff' : '2px solid #fff';
+  const shadow = active ? '0 2px 10px rgba(0,0,0,0.45)' : '0 2px 6px rgba(0,0,0,0.25)';
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${color};color:#fff;font-size:11px;font-weight:600;padding:4px 9px;border-radius:6px;white-space:nowrap;box-shadow:${shadow};border:${border};opacity:${active?1:0.75};">${label}</div>`,
+    iconAnchor: [0, 26]
+  });
+}
+
+function clearMap() {
+  polylines.forEach(l => map.removeLayer(l));
+  destMarkers.forEach(m => map.removeLayer(m));
+  if (originMarker) map.removeLayer(originMarker);
+  polylines = []; destMarkers = []; originMarker = null;
+}
+
+function buildMap() {
+  clearMap();
+  if (!ORIGIN) return;
+
+  originMarker = L.marker([ORIGIN.lat, ORIGIN.lng], { icon: originIcon(), zIndexOffset: 1000 })
+    .addTo(map)
+    .bindTooltip(`<b>${ORIGIN.name}</b><br>Origen`, { direction: 'top' });
+
+  const bounds = [[ORIGIN.lat, ORIGIN.lng]];
+
+  dests.forEach((d, i) => {
+    bounds.push([d.lat, d.lng]);
+    const isActive = (i === activeIdx);
+    const line = L.polyline([[ORIGIN.lat, ORIGIN.lng], [d.lat, d.lng]], {
+      color: d.color, weight: isActive ? 3.5 : 2,
+      opacity: isActive ? 0.9 : 0.45, dashArray: '8 5'
+    }).addTo(map);
+    polylines.push(line);
+
+    const km = (haversine(ORIGIN.lat, ORIGIN.lng, d.lat, d.lng) / 1000).toFixed(2);
+    const m = L.marker([d.lat, d.lng], { icon: destIcon(d.color, d.name, isActive) })
+      .addTo(map)
+      .bindTooltip(`<b>${d.name}</b><br>${km} km lineal${d.grupo ? '<br>' + d.grupo : ''}`, { direction: 'top' });
+    m.on('click', () => setActive(i));
+    destMarkers.push(m);
+  });
+
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [45, 45] });
+  else map.setView([ORIGIN.lat, ORIGIN.lng], 13);
+}
+
+/* ══════════════════════════════════════════
+   ACTIVE DEST & STATS
+══════════════════════════════════════════ */
+function setActive(i) {
+  activeIdx = i;
+  updateStats();
+  buildMap();
+  renderList();
+}
+
+function updateStats() {
+  if (!ORIGIN || dests.length === 0) {
+    ['sLineal','sVial','sMin'].forEach(id => document.getElementById(id).textContent = '—');
+    return;
+  }
+  const d = dests[activeIdx] || dests[0];
+  const lin = haversine(ORIGIN.lat, ORIGIN.lng, d.lat, d.lng);
+  const via = lin * 1.22;
+  const min = Math.round(via / 1000 / 30 * 60);
+  document.getElementById('sLineal').textContent = (lin/1000).toFixed(2)+' km';
+  document.getElementById('sVial').textContent   = (via/1000).toFixed(2)+' km';
+  document.getElementById('sMin').textContent    = min+' min';
+}
+
+/* ══════════════════════════════════════════
+   RENDER LIST
+══════════════════════════════════════════ */
+function renderList() {
+  const el = document.getElementById('destList');
+  if (dests.length === 0) {
+    el.innerHTML = '<div class="empty-hint">No hay destinos.<br>Agrégalos abajo o en el Sheet.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  dests.forEach((d, i) => {
+    const km = ORIGIN ? (haversine(ORIGIN.lat, ORIGIN.lng, d.lat, d.lng)/1000).toFixed(2)+' km' : '—';
+    const row = document.createElement('div');
+    row.className = 'dest-row' + (i === activeIdx ? ' active' : '');
+    row.onclick = () => setActive(i);
+    row.innerHTML = `
+      <div class="dot" style="background:${d.color}"></div>
+      <span class="dest-name" title="${d.name}${d.grupo?' — '+d.grupo:''}">${d.name}</span>
+      <span class="dest-km">${km}</span>
+      <button class="dest-del" onclick="removeDest(event,${i})" title="Eliminar">✕</button>`;
+    el.appendChild(row);
+  });
+}
+
+/* ══════════════════════════════════════════
+   APPS SCRIPT — LOAD
+══════════════════════════════════════════ */
+async function loadFromScript() {
+  const url = document.getElementById('iScript').value.trim();
+  if (!url) { toast('Pega la URL del Apps Script primero.'); return; }
+
+  localStorage.setItem(LS_KEY_URL, url);
+  setStatus('loading');
+  document.getElementById('btnLoad').disabled = true;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    // data.origin = { name, lat, lng }
+    // data.dests  = [ { name, lat, lng, grupo } ]
+    if (!data.origin || !data.origin.lat) throw new Error('Respuesta inválida del script.');
+
+    ORIGIN = { lat: +data.origin.lat, lng: +data.origin.lng, name: data.origin.name };
+    dests  = (data.dests || []).map((d, i) => ({
+      lat: +d.lat, lng: +d.lng,
+      name: d.name, grupo: d.grupo || '',
+      color: COLORS[i % COLORS.length]
+    }));
+    activeIdx = 0;
+
+    localStorage.setItem(LS_KEY_DATA, JSON.stringify({ origin: ORIGIN, dests }));
+    setStatus('ok', 'Conectado · ' + dests.length + ' destinos');
+    buildMap(); renderList(); updateStats();
+    toast('✓ Datos cargados desde el Sheet');
+  } catch(e) {
+    setStatus('err', 'Error al cargar');
+    toast('Error: ' + e.message);
+  } finally {
+    document.getElementById('btnLoad').disabled = false;
+  }
+}
+
+/* ══════════════════════════════════════════
+   APPS SCRIPT — SAVE NEW DEST
+══════════════════════════════════════════ */
+async function saveDestToScript(dest) {
+  const url = localStorage.getItem(LS_KEY_URL);
+  if (!url) return; // no script configured, silent
+  try {
+    await fetch(url, {
+      method: 'POST',
+      mode: 'no-cors', // Apps Script POST — no-cors is required
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'addDest', dest })
+    });
+  } catch(e) {
+    console.warn('No se pudo guardar en Sheet:', e);
+  }
+}
+
+async function removeDestFromScript(name) {
+  const url = localStorage.getItem(LS_KEY_URL);
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'removeDest', name })
+    });
+  } catch(e) { console.warn('No se pudo eliminar en Sheet:', e); }
+}
+
+/* ══════════════════════════════════════════
+   ADD / REMOVE DEST
+══════════════════════════════════════════ */
+async function addDest() {
+  const name  = document.getElementById('iName').value.trim();
+  const grupo = document.getElementById('iGrupo').value.trim();
+  const lat   = parseFloat(document.getElementById('iLat').value);
+  const lng   = parseFloat(document.getElementById('iLon').value);
+  if (!name || isNaN(lat) || isNaN(lng)) { toast('Completa nombre, latitud y longitud.'); return; }
+
+  const newDest = { lat, lng, name, grupo, color: COLORS[dests.length % COLORS.length] };
+  dests.push(newDest);
+  activeIdx = dests.length - 1;
+
+  document.getElementById('iName').value  = '';
+  document.getElementById('iGrupo').value = '';
+  document.getElementById('iLat').value   = '';
+  document.getElementById('iLon').value   = '';
+
+  buildMap(); renderList(); updateStats();
+  toast('Destino agregado');
+  await saveDestToScript({ name, lat, lng, grupo });
+}
+
+async function removeDest(e, i) {
+  e.stopPropagation();
+  const name = dests[i].name;
+  dests.splice(i, 1);
+  if (activeIdx >= dests.length) activeIdx = Math.max(0, dests.length - 1);
+  buildMap(); renderList(); updateStats();
+  toast('Destino eliminado');
+  await removeDestFromScript(name);
+}
+
+/* ══════════════════════════════════════════
+   UI HELPERS
+══════════════════════════════════════════ */
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusTxt');
+  dot.className = state === 'ok' ? 'ok' : state === 'err' ? 'err' : '';
+  txt.textContent = msg || (state === 'loading' ? 'Cargando…' : 'Sin conectar');
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.display = 'none', 3200);
+}
+
+function focusScript() {
+  document.getElementById('iScript').focus();
+}
+
+/* ══════════════════════════════════════════
+   INIT
+══════════════════════════════════════════ */
+initMap();
+
+// Restore URL from localStorage
+const savedUrl = localStorage.getItem(LS_KEY_URL);
+if (savedUrl) {
+  document.getElementById('iScript').value = savedUrl;
+  // Try to restore cached data while waiting for reload
+  try {
+    const cached = JSON.parse(localStorage.getItem(LS_KEY_DATA) || 'null');
+    if (cached && cached.origin) {
+      ORIGIN = cached.origin;
+      dests  = (cached.dests || []).map((d, i) => ({ ...d, color: COLORS[i % COLORS.length] }));
+      buildMap(); renderList(); updateStats();
+      setStatus('ok', 'Cache local · recarga para actualizar');
+    }
+  } catch(_) {}
+  document.getElementById('configBanner').style.display = 'none';
+} else {
+  document.getElementById('configBanner').style.display = 'block';
+}
+</script>
+</body>
+</html>
