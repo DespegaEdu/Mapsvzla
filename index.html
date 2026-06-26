@@ -254,17 +254,17 @@ var scriptUrl = localStorage.getItem(SCRIPT_URL_KEY) || '';
 var _cache = {};
 
 var Store = {
-  // Guarda en cache local + encola escritura al Sheet
+  // Guarda en cache local + escribe al Sheet
   async set(key, obj){
     _cache[key] = obj;
     try{ localStorage.setItem(key, JSON.stringify(obj)); }catch(e){}
-    if(scriptUrl){ _postToSheet({action:'set', key:key, value:obj}).catch(function(){}); }
+    _sheetSet(key, obj).catch(function(){});
   },
-  // Marca como eliminado en Sheet + borra del cache
+  // Borra del cache + elimina del Sheet
   async del(key){
     delete _cache[key];
     try{ localStorage.removeItem(key); }catch(e){}
-    if(scriptUrl){ _postToSheet({action:'del', key:key}).catch(function(){}); }
+    _sheetDel(key).catch(function(){});
   },
   // Lista claves por prefijo (desde cache en memoria)
   async list(prefix){
@@ -276,39 +276,56 @@ var Store = {
   }
 };
 
-// Escribe al Sheet (fire-and-forget, no-cors)
-async function _postToSheet(payload){
-  try{
-    await fetch(scriptUrl, {
-      method:'POST', mode:'no-cors',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-  }catch(e){ console.warn('Sheet write error:', e); }
+// Construye URL con parámetros GET (sin POST, sin CORS preflight)
+function _sheetUrl(params){
+  var base = scriptUrl + (scriptUrl.indexOf('?')>=0 ? '&' : '?');
+  return base + Object.keys(params).map(function(k){
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&') + '&t=' + Date.now();
 }
 
-// Carga TODOS los datos del Sheet y rellena el cache
+// Escribe un objeto al Sheet vía GET ?op=set&payload=...
+async function _sheetSet(key, obj){
+  if(!scriptUrl) return;
+  try{
+    var copy = Object.assign({}, obj, {_key: key});
+    var url = _sheetUrl({op:'set', payload: JSON.stringify(copy)});
+    var res = await fetch(url);
+    var json = await res.json();
+    if(json.error) console.warn('Sheet set error:', json.error);
+  }catch(e){ console.warn('Sheet set error:', e); }
+}
+
+// Elimina una clave del Sheet vía GET ?op=del&key=...
+async function _sheetDel(key){
+  if(!scriptUrl) return;
+  try{
+    var url = _sheetUrl({op:'del', key: key});
+    await fetch(url);
+  }catch(e){ console.warn('Sheet del error:', e); }
+}
+
+// Carga TODOS los datos del Sheet vía GET ?op=read
 async function _loadFromSheet(){
   if(!scriptUrl) return false;
   try{
-    var res = await fetch(scriptUrl + '?t=' + Date.now());
+    var res = await fetch(_sheetUrl({op:'read'}));
     if(!res.ok) return false;
     var data = await res.json();
-    if(data.error) return false;
+    if(data.error){ console.warn('Sheet read error:', data.error); return false; }
     // Reconstruir cache desde respuesta del Sheet
-    var nuevo = {};
-    (data.reportes||[]).forEach(function(r){ nuevo['reporte:'+r.id]=r; });
-    (data.equipos||[]).forEach(function(t){ nuevo['equipo:'+t.id]=t; });
-    // Fusionar: conservar ediciones locales recientes no confirmadas
-    Object.keys(nuevo).forEach(function(k){
-      var remoto = nuevo[k], local = _cache[k];
-      // El más reciente gana
-      if(!local || (remoto.actualizado||0) >= (local.actualizado||0)){
-        _cache[k] = remoto;
-        try{ localStorage.setItem(k, JSON.stringify(remoto)); }catch(e){}
+    var remoto = {};
+    (data.reportes||[]).forEach(function(r){ remoto['reporte:'+r.id]=r; });
+    (data.equipos||[]).forEach(function(t){ remoto['equipo:'+t.id]=t; });
+    // Fusionar: el más reciente gana
+    Object.keys(remoto).forEach(function(k){
+      var r = remoto[k], local = _cache[k];
+      if(!local || (r.actualizado||r.creado||0) >= (local.actualizado||local.creado||0)){
+        _cache[k] = r;
+        try{ localStorage.setItem(k, JSON.stringify(r)); }catch(e){}
       }
     });
-    // Eliminar del cache los que el Sheet marcó como eliminados
+    // Eliminar los que el Sheet marcó como borrados
     (data.eliminados||[]).forEach(function(k){
       delete _cache[k];
       try{ localStorage.removeItem(k); }catch(e){}
@@ -330,9 +347,11 @@ function renderScriptBanner(){
     '<span style="color:#8b949e;flex-shrink:0">⚠ Sin Apps Script:</span>'+
     '<input id="bannerUrl" placeholder="https://script.google.com/macros/s/.../exec" '+
       'style="flex:1;min-width:200px;background:#0d1117;border:1px solid #2a323d;color:#e6edf3;border-radius:7px;padding:6px 9px;font-size:12px">'+
-    '<button onclick="saveScriptUrl()" style="background:#2dd4bf;color:#04201c;border:0;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Conectar Sheet</button>'+
+    '<button id="btnConectar" style="background:#2dd4bf;color:#04201c;border:0;border-radius:7px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Conectar Sheet</button>'+
     '<span style="color:#6b7480;font-size:11px">Los datos quedarán solo en este dispositivo hasta que configures el script.</span>';
   document.body.appendChild(banner);
+  document.getElementById('btnConectar').addEventListener('click', saveScriptUrl);
+  document.getElementById('bannerUrl').addEventListener('keydown', function(e){ if(e.key==='Enter') saveScriptUrl(); });
 }
 function saveScriptUrl(){
   var v = document.getElementById('bannerUrl').value.trim();
